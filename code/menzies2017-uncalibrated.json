@@ -1,0 +1,29 @@
+{
+    // Fixed annual birth rate for steady state based on 1M pop & mu_B.
+    "a" : 15000,
+    // Background mortality rate.
+    "mu_B" : 0.015,
+    // Treatment uptake for early disease.
+    "r_E" : 0.0,
+    // Fraction of births entering non-susceptible state.
+    "b_alpha" : 2,
+    "b_beta" : 8,
+    // Mortality rates.
+    "mu_E_mean" : -3.121,	// Early disease.
+    "mu_L_mean" : -1.511,	// Late disease.
+    "mu_T_mean" : -3.814;	// Treatment.
+    "mu_E_sd" : 0.5,
+    "mu_L_sd" : 0.5,
+    "mu_T_sd" : 0.5,
+    // Effective rate for transmission.
+    "rho_mean" : -0.818,
+    "rho_sd" : 0.5,
+    // Disease rates.
+    "p_mean" : -2.428,	    // Progression from early to late disease.
+    "r_L_mean" : -0.818,    // Treatment uptake for late disease. */
+    "p_sd" : 0.5,
+    "r_L_sd" : 0.5,
+    // Annual cost of treatment.
+    "c_T_mean" : 6.888,
+    "c_T_sd" : 0.2
+}

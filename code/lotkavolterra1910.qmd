@@ -1,0 +1,93 @@
+---
+title: "Lotka-Volterra 1910 calibration with ABC-SMC"
+author: "Pariksheet Nanda"
+execute:
+  cache: true
+---
+
+```{r}
+#| label: load-packages-and-model
+#| cache: false
+
+library(EasyABC)
+library(fdrtool) # *halfnorm
+library(deSolve)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+lv_parameters <- c(
+    a = 1.0,
+    b = 0.1,
+    c = 1.5,
+    d = 0.75
+)
+lv_initial_values <- c(prey = 10.0, predator = 5.0)
+times <- seq(0, 15, length.out = 100)
+
+lotka_volterra_model <- function(time, initial_values, parameters) {
+    with(as.list(c(initial_values, parameters)), {
+        list(c(a*prey - b*prey*predator,
+               -c*predator + d*b*prey*predator))
+    })
+}
+```
+
+```{r}
+#| label: generate-noisy-data
+#| fig-cap: Generated noisy data from twice adding N(0, 1).
+
+obs <- ode(y = lv_initial_values, times = times, func = lotka_volterra_model,
+           parms = lv_parameters)
+
+df <-
+    tibble::as_tibble(as.data.frame(obs)) %>%
+    ## Add noise.
+    mutate(prey = prey + rnorm(n()) + rnorm(n()),
+           predator = predator + rnorm(n()) + rnorm(n()))
+df_long <- df %>% pivot_longer(cols = -time, names_to = "variable",
+                               values_to = "count")
+ggplot(df_long, aes(time, count, color = variable)) +
+    geom_point()
+```
+
+```{r}
+## Priors different from original data.
+prior_sampler <- function() c(a = rhalfnorm(n = 1, theta = 1),
+                              b = rhalfnorm(n = 1, theta = 1))
+prior_density <- function(x) c(a = dhalfnorm(x, theta = 1),
+                               b = dhalfnorm(x, theta = 1))
+model_distance <- function(params) {
+    sim <- ode(y = lv_initial_values,
+               times = times,
+               func = lotka_volterra_model,
+               ## a, b are passed in from params, and c, d are constant.
+               parms = replace(lv_parameters, 1:2, params))
+    #sim
+    dist <- vector(length = length(params))
+    for (param in 1:2) {
+        ## Offset by 1, because column 1 is the time axis.
+        x <- sim[, param + 1]
+        y <- obs[, param + 1]
+        dist[param] <- dist(rbind(x, y))
+    }
+    sum(dist)
+}
+
+## Using 500 n.sample I get:
+## Error in SABC.noninf(f.dist = f.dist, d.prior = d.prior, r.prior = r.prior,  : 
+##   'iter.max' reached! No initial sample could be generated.
+
+system.time({
+    fit <- SABC(r.model = model_distance,
+                ## y = obs,
+                ## summarystats = TRUE,
+                r.prior = prior_sampler,
+                d.prior = prior_density,
+                n.sample = 5e2,
+                eps.init = 2,
+                iter.max = 5e4,
+                verbose = 1)
+})
+
+```
