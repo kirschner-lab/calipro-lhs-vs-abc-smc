@@ -1,7 +1,15 @@
-subject_number = 1;
+#@ File file_input_roiset
+#@ Output tbl
 
 // ROI Manager functions are slow outside of batch mode.
 setBatchMode(true);
+
+// Clear any ROIs then loading the file.
+if (roiManager("count") > 0) {
+    roiManager("deselect");
+    roiManager("delete");
+}
+roiManager("open", file_input_roiset);
 
 // Get axis coordinates from the 3 fiducials.
 roiManager("select", 0);
@@ -33,12 +41,15 @@ for(i = 0; i < n; i++) {
 	xs[i] = ((x + width/2) - (origin[0] + origin[2]/2)) * x_cal;
 	ys[i] = ((origin[1] + origin[3]/2) - (y + height/2)) * y_cal;
 }
-tbl = "subject-" + subject_number;
+// Save sa table and CSV.
+tbl = File.getNameWithoutExtension(file_input_roiset) + ".csv";
+file_output_csv = File.getDirectory(file_input_roiset) + tbl;
 Table.create(tbl);
 Table.reset(tbl);
-Table.setColumn("x", xs);
-Table.setColumn("y", ys);
+Table.setColumn("year", xs);
+Table.setColumn("cd4_cells_per_mm3", ys);
 Table.update;
+Table.save(file_output_csv);
 
 // ROI Manager functions are slow outside of batch mode.
 setBatchMode(false);
