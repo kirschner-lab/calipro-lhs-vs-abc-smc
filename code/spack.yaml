@@ -1,0 +1,11 @@
+# This is a Spack Environment file.
+#
+# It describes a set of packages to be installed, along with
+# configuration settings.
+spack:
+  # Match the sundials compilation options to
+  # https://github.com/pymc-devs/sunode/blob/master/sunode/build_cvodes.py#L42:L51
+  specs: [sundials+klu~mpi+pthread logging-level=4]
+  view: true
+  concretizer:
+    unify: true
