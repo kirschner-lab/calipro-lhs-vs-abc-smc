@@ -1,6 +1,7 @@
 import arviz as az
 import matplotlib.pyplot as plt
 import numpy as np
+from plotnine import ggplot, geom_line, geom_point, aes, facet_wrap
 from scipy.integrate import odeint
 
 
@@ -23,6 +24,8 @@ if __name__ == '__main__':
     time = np.linspace(0, time_end, n_steps)
 
     # Load files saved by loktavolterra1910_model.py
+    idata_untrained = az.from_netcdf(
+        'lotkavolterra1910-01_output-idata_untrained.nc')
     idata_lv = az.from_netcdf('lotkavolterra1910-01_output-idata_lv.nc')
     observed_lv = idata_lv.observed_data['sim'].to_numpy()
     c = float(idata_lv.constant_data['c'])
@@ -30,11 +33,16 @@ if __name__ == '__main__':
 
     # Plot model chains, posterior, and overlay ODEs on the noisy data.
     az.summary(idata_lv)
-    az.plot_trace(idata_lv, kind='rank_vlines')
-    plt.show()
-    az.plot_posterior(idata_lv)
-    plt.show()
+    #az.plot_trace(idata_lv, kind='rank_vlines')
+    #plt.show()
+    #az.plot_posterior(idata_lv)
+    #plt.show()
 
+    prior = idata_untrained.prior.stack(samples=('draw', 'chain'))
+    df = (prior.to_dataframe()
+          # Drop 'sim' column.
+          .drop('sim', axis=1)
+          )
     posterior = idata_lv.posterior.stack(samples=('draw', 'chain'))
     _, ax = plt.subplots(figsize=(14, 6))
     ax.plot(observed_lv[:, 0], 'o', label='prey', c='C0', mec='k')
@@ -48,13 +56,21 @@ if __name__ == '__main__':
     ax.set_xlabel('time')
     ax.set_ylabel('population')
     ax.legend()
-    for i in np.random.randint(0, n_steps, 75):
+    #for i in np.random.randint(0, n_steps, 75):
+    #    sim = simulate_lotka_volterra(None,
+    #                                  posterior['a'][i],
+    #                                  posterior['b'][i],
+    #                                  c,
+    #                                  d)
+    #    ax.plot(sim[:, 0], alpha=0.1, c='C0')
+    #    ax.plot(sim[:, 1], alpha=0.1, c='C1')
+    for i in range(75):
         sim = simulate_lotka_volterra(None,
-                                      posterior['a'][i],
-                                      posterior['b'][i],
+                                      prior['a'][i],
+                                      prior['b'][i],
                                       c,
                                       d)
         ax.plot(sim[:, 0], alpha=0.1, c='C0')
         ax.plot(sim[:, 1], alpha=0.1, c='C1')
-    plt.savefig('/Users/pnanda/Sync/lab-reports/2022-11-17/img/pymc.pdf')
+    #plt.savefig('../results/pymc.pdf')
     plt.show()
