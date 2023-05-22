@@ -102,7 +102,12 @@ def model_hiv(pars):
     """
     ode_hiv = concretize_ode_hiv(pars)
     sim = odeint(ode_hiv, T_OUT, INITIAL_VALUES)
-    return {"data": sim}
+    df_sim = (
+        pd.DataFrame(data=np.c_[sim.values.t.T, sim.values.y],
+                     columns=["day", "dT", "dT_li", "dT_ai", "V"])
+        .assign(cd4_sim=lambda x: x.dT + x.dT_li + x.dT_ai)
+    )
+    return {"data": df_sim}
 
 
 def distance(sim, obs):
@@ -120,13 +125,8 @@ def distance(sim, obs):
     obs: pandas dataframe [T x V']
 
     """
-    df_sim = (
-        pd.DataFrame(data=np.c_[sim["data"].values.t.T, sim["data"].values.y],
-                     columns=["day", "dT", "dT_li", "dT_ai", "V"])
-        .assign(cd4_sim=lambda x: x.dT + x.dT_li + x.dT_ai)
-    )
     df = (
-        pd.merge_asof(OBS_TS, df_sim, on="day")
+        pd.merge_asof(OBS_TS, sim["data"], on="day")
         .dropna(axis=0, how="any")
     )
     return canberra(df.cd4, df.cd4_sim)
