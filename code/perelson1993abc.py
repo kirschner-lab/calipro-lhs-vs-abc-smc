@@ -190,7 +190,8 @@ priors = pyabc.Distribution(
     # day^{-1}, Rate latently to actively infected conversion.
     k_2=pyabc.RV("gamma", a=1.594566171, scale=0.002008847),
     # Number of free virus produced by lysing a CD4+ cell.
-    N=pyabc.RV("nbinom", n=13.5, p=0.01477833),
+    # N=pyabc.RV("nbinom", n=13.5, p=0.01477833),
+    N=pyabc.RV("uniform", 1400, 1400),
 )
 model = pyabc.model.FunctionModel(model_hiv, name="Perelson1993HIV")
 abc = pyabc.ABCSMC(
