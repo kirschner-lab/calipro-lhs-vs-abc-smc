@@ -4,6 +4,8 @@ cells. Math Biosci. 1993 Mar;114(1):81-125.
 doi: 10.1016/0025-5564(93)90043-a. PMID: 8096155.
 """
 
+import pickle
+
 import numpy as np
 import pandas as pd
 import pymc as pm
@@ -62,7 +64,7 @@ def simulate_hiv(rng, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N, size=None):
 
 if __name__ == "__main__":
     # Simulate from the model.
-    with pm.Model() as model_lv:
+    with pm.Model() as model_hiv:
         # Table 1, page 88.
         # day^{-1}mm^{-3}, Rate of supply of CD4+ cells from precursors.
         s = pm.Gamma("s", alpha=1.985656, beta=5.681687)
@@ -91,6 +93,7 @@ if __name__ == "__main__":
                            epsilon=10,
                            observed=OBSERVED)
         # Collect inference data.
-        idata_lv = pm.sample_smc(cores=8)
+        idata_hiv = pm.sample_smc(cores=8)
 
-    idata_lv.to_json("perelson1993-01_output-idata_lv.json")
+    with open("perelson1993-01_output-idata_hiv.pkl", "wb") as file_:
+        pickle.dump(idata_hiv, file_)
