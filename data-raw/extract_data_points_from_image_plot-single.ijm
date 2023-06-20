@@ -4,6 +4,9 @@
 // ROI Manager functions are slow outside of batch mode.
 setBatchMode(true);
 
+// Open the image.
+open("nejm199501263320402_f1.jpeg");
+
 // Clear any ROIs then loading the file.
 if (roiManager("count") > 0) {
     roiManager("deselect");
