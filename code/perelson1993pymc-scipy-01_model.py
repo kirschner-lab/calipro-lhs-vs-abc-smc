@@ -12,7 +12,7 @@ import pymc as pm
 from scipy.integrate import odeint
 
 
-T_STEADY_STATE = 4  # years, Assumed time to CD4+ steady state.
+T_STEADY_STATE = 5  # years, Assumed time to CD4+ steady state.
 
 
 def read_obs_hiv_cd4_timeseries():
@@ -55,11 +55,13 @@ def hiv(y, t, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N):
 
 
 def simulate_hiv(rng, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N, size=None):
-    ret = odeint(hiv, Y0, T_VALS, rtol=0.1, mxstep=100,
+    # Pad zero value time to match the Y0 initial condition.
+    times = np.concatenate((np.zeros((1,)), T_VALS))
+    ret = odeint(hiv, Y0, times, rtol=0.1, mxstep=100,
                  args=(s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N))
     # Apply the dimensional reduction here to make the model comparable to the
     # data.  Sum all the T cell counts.
-    return np.sum(ret[:, 0:3], axis=1)
+    return np.sum(ret[1:, 0:3], axis=1)
 
 
 if __name__ == "__main__":
