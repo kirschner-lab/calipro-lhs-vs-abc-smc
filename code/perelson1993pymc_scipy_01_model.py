@@ -9,6 +9,7 @@ import pickle
 import numpy as np
 import pandas as pd
 import pymc as pm
+from pymc.smc.kernels import MH
 from scipy.integrate import odeint
 
 
@@ -39,8 +40,20 @@ T_VALS = DF_OBSERVED_1.day.to_numpy()
 Y0 = [1e3, 0, 0, 1e-3]
 
 
-def hiv(y, t, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N):
+def hiv(y, t, s, mu_V, N):
     """Rates of change RHS (equations 5a-5d, page 87)."""
+    # mm^{-3}, Maximum CD4+ cells.
+    T_max = 1500
+    # day^{-1}, Death rate of uninfected and latently CD4+ cells.
+    mu_T = 0.02
+    # day^{-1}, Death rate of actively infected CD4+ cells.
+    mu_b = 0.24
+    # day^{-1}, Rate of growth for the CD4+ cells.
+    r = 0.03
+    # mm^{3}day^{-1}, Rate constant for CD4+ becoming infected.
+    k_1 = 2.4e-5
+    # day^{-1}, Rate latently to actively infected conversion.
+    k_2 = 3e-3
     return np.array([
         # T
         s - mu_T*y[0] + r*y[0]*(1 - (y[0] + y[1] + y[2])/T_max) -
@@ -54,14 +67,17 @@ def hiv(y, t, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N):
     ])
 
 
-def simulate_hiv(rng, s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N, size=None):
+def simulate_hiv(rng, s, mu_V, N, size=None):
     # Pad zero value time to match the Y0 initial condition.
     times = np.concatenate((np.zeros((1,)), T_VALS))
-    ret = odeint(hiv, Y0, times, rtol=0.1, mxstep=100,
-                 args=(s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N))
-    # Apply the dimensional reduction here to make the model comparable to the
-    # data.  Sum all the T cell counts.
-    return np.sum(ret[1:, 0:3], axis=1)
+    try:
+        ret = odeint(hiv, Y0, times, rtol=0.01, mxstep=100,
+                     args=(s, mu_V, N))
+        # Apply the dimensional reduction here to make the model comparable to
+        # the data.  Sum all the T cell counts.
+        return np.sum(ret[1:, 0:3], axis=1)
+    except np.linalg.LinAlgError:
+        return np.empty((len(T_VALS),)).fill(np.nan)
 
 
 if __name__ == "__main__":
@@ -70,20 +86,8 @@ if __name__ == "__main__":
         # Table 1, page 88.
         # day^{-1}mm^{-3}, Rate of supply of CD4+ cells from precursors.
         s = pm.Gamma("s", alpha=1.985656, beta=5.681687)
-        # day^{-1}, Rate of growth for the CD4+ cells.
-        r = pm.Gamma("r", alpha=4.530347876, beta=0.006990707)
-        # mm^{-3}, Maximum CD4+ cells.
-        T_max = pm.NegativeBinomial("T_max", n=14.0126, p=0.02432633)
-        # day^{-1}, Death rate of uninfected and latently CD4+ cells.
-        mu_T = pm.Gamma("mu_T", alpha=2.10552523, beta=0.01068658)
-        # day^{-1}, Death rate of actively infected CD4+ cells.
-        mu_b = pm.Gamma("mu_b", alpha=1.9856561, beta=0.1363606)
         # day^{-1}, Death rate of free virus.
         mu_V = pm.Gamma("mu_V", alpha=1.985657, beta=1.363605)
-        # mm^{3}day^{-1}, Rate constant for CD4+ becoming infected.
-        k_1 = pm.Gamma("k_1", alpha=1.985657, beta=1.363605e-5)
-        # day^{-1}, Rate latently to actively infected conversion.
-        k_2 = pm.Gamma("k_2", alpha=1.594566171, beta=0.002008847)
         # Number of free virus produced by lysing a CD4+ cell.
         N = pm.NegativeBinomial("N", n=13.5, p=0.01477833)
 
@@ -91,11 +95,11 @@ if __name__ == "__main__":
         # model.
         sim = pm.Simulator("sim",
                            simulate_hiv,
-                           params=(s, r, T_max, mu_T, mu_b, mu_V, k_1, k_2, N),
+                           params=(s, mu_V, N),
                            epsilon=10,
                            observed=OBSERVED)
         # Collect inference data.
-        idata_hiv = pm.sample_smc(cores=8)
+        idata_hiv = pm.sample_smc(cores=8, kernel=MH)
 
     with open("perelson1993-01_output-idata_hiv.pkl", "wb") as file_:
         pickle.dump(idata_hiv, file_)
