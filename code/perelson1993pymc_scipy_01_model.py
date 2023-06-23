@@ -9,6 +9,8 @@ import pickle
 import numpy as np
 import pandas as pd
 import pymc as pm
+# Workaround for intermittent multivariate Normal kernel crashes.  See:
+# https://github.com/pymc-devs/pymc/issues/6786
 from pymc.smc.kernels import MH
 from scipy.integrate import odeint
 
