@@ -177,10 +177,18 @@ for (iter in 1:n_iter) {
     ## Old parameter ranges.
     df_lhs <-
         as_tibble(lhs, rownames = "param_set") %>%
+        bind_cols(as_tibble(lhs_cdf) %>%
+                  rename_with(~ str_c(.x, "-cdf"))) %>%
         mutate(param_set = as.integer(param_set)) %>%
         inner_join(df_class %>% distinct(param_set, replicate, pass),
                    by = "param_set") %>%
-        pivot_longer(s:N, names_to = "param", values_to = "value")
+        pivot_longer(cols = ! c(param_set, replicate, pass),
+                     names_to = "param", values_to = "value") %>%
+        separate_wider_delim(param, delim = "-",
+                             names = c("param", "cdf"),
+                             too_few = "align_start") %>%
+        mutate(value_is_cdf = ! is.na(cdf)) %>%
+        select(-cdf)
     ranges_prev <-
         df_lhs %>%
         select(param, value) %>%
@@ -200,6 +208,21 @@ for (iter in 1:n_iter) {
     ## Tabulate parameter ranges before and after ADS adjutment.
     ranges_both <-
         bind_rows(before = ranges_prev, after = ranges_new, .id = "range")
+
+    ## Find parameter ranges to change.
+    ranges_changed <-
+        ranges_both %>%
+        mutate(bound = rep(c("lower", "upper"), 2), .before = 2) %>%
+        pivot_longer(cols = ! c(range, bound), names_to = "param", values_to = "value") %>%
+        pivot_wider(id_cols = c("param", "bound"), names_from = "range") %>%
+        mutate(changed = before != after)
+
+    ## If no ranges changed, end calibration.
+    if (! any(pull(ranges_changed, changed))) {
+        message(sprintf(c("No parameter ranges changed in iteration %d. ",
+                          "Ended calibration loop."), iter))
+        break
+    }
 
     ## TODO: Fit priors to new parameter ranges.
 }
