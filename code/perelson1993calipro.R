@@ -123,7 +123,12 @@ gg_style(
 
 ggsave("../results/hiv-boundaries.pdf", width = width, height = height)
 
-## Calibration adjustment function.
+## Calibration adjustment function: Alternative Density Subtraction (ADS).
+##
+## Joslyn LR, Kirschner DE, Linderman JJ. CaliPro: A Calibration Protocol That
+## Utilizes Parameter Density Estimation to Explore Parameter Space and
+## Calibrate Complex Biological Models. Cell Mol Bioeng. 2020 Sep
+## 15;14(1):31-47. doi: 10.1007/s12195-020-00650-z
 ads <- function(df, n = 512) {
     range <- df %>% pull(value) %>% range()
     ## Fixed value / no passing values.
