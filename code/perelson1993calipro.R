@@ -55,51 +55,6 @@ hiv_s_const <- function(t, initial_values, parameters) {
 df_exp <-
     read_csv("../data/pantaleo1995-figure1.csv", col_types = "cdd")
 
-## Visualize the raw data.
-gg_style <- function(gg) {
-    gg +
-        scale_x_continuous(breaks = 1:10) +
-        labs(x = "Year",
-             y = expression(CD4^"+" ~ "T-cells" ~ per ~ mm^3)) +
-        guides(color = "none")
-}
-
-gg_style(
-    df_exp %>%
-    ggplot(aes(x = year, y = cd4_cells_per_mm3, group = group, color = group)) +
-    geom_line()
-)
-
-scale <- 0.5
-width <- 13.33 * scale
-height <- 6.06 * scale
-ggsave("../results/hiv-raw.pdf", width = width, height = height)
-
-## Visualize the range.
-gg_style(
-    df_exp %>%
-    group_by(year) %>%
-    reframe(cd4 = range(cd4_cells_per_mm3)) %>%
-    group_by(year) %>%
-    mutate(boundary = c("lower", "upper")[row_number()]) %>%
-    pivot_wider(id_cols = year, names_from = boundary, values_from = cd4) %>%
-    ggplot(aes(x = year)) +
-    geom_ribbon(alpha = 0.3, aes(ymin = lower, ymax = upper)) +
-    geom_point(data = df_exp, aes(y = cd4_cells_per_mm3, color = group))
-)
-
-ggsave("../results/hiv-range.pdf", width = width, height = height)
-
-## Visualize the smoothing function.
-gg_style(
-    df_exp %>%
-    ggplot(aes(x = year, y = cd4_cells_per_mm3)) +
-    geom_point(aes(color = group)) +
-    geom_smooth()
-)
-
-ggsave("../results/hiv-smooth.pdf", width = width, height = height)
-
 ## Set the experimental data boundaries.
 cd4 <-
     df_exp %>%
@@ -112,16 +67,6 @@ df_boundaries <-
     tibble(year = 0:10,
            lower = cd4[1],
            upper = cd4[2])
-gg_style(
-    df_boundaries %>%
-    ggplot(aes(x = year)) +
-    geom_ribbon(alpha = 0.2, aes(ymin = lower, ymax = upper)) +
-    geom_point(data = df_exp, aes(y = cd4_cells_per_mm3, color = group)) +
-    geom_label(aes(y = lower, label = lower, x = mean(year))) +
-    geom_label(aes(y = upper, label = upper, x = mean(year)))
-)
-
-ggsave("../results/hiv-boundaries.pdf", width = width, height = height)
 
 ## Calibration adjustment function: Alternative Density Subtraction (ADS).
 ##
@@ -203,9 +148,6 @@ for (iter in 1:n_iter) {
         }
     })
 
-    diagnostics(out[[1]])
-    summary(out[[1]])
-
     ## Gather the output from the LHS parameter samples.
     df_sim <-
         lapply(out, as.data.frame) %>%
@@ -232,61 +174,13 @@ for (iter in 1:n_iter) {
         summarize(pass = mean(pass) * 100)
     )
 
-    ## Plot the trajectories.
-    gg_style(
-        df_class %>%
-        ggplot(aes(x = time_years, y = T_sum)) +
-        geom_line(alpha = 0.1, aes(group = param_set, color = pass)) +
-        geom_point(data = df_exp, aes(x = year, y = cd4_cells_per_mm3))
-    )
-
-    ggsave(sprintf("../results/hiv-calipro-traj-iter-%d.pdf", iter),
-           width = width, height = height)
-
-    ## Plot the trajectory 5%-50%-95% quantiles.
-    ##
-    ## See https://stackoverflow.com/a/51993331
-    quantiles <- function(x, q = c(0.05, 0.95), na.rm = TRUE) {
-        tibble(y = median(x),
-               ymin = quantile(x, probs = q[1]),
-               ymax = quantile(x, probs = q[2]))
-    }
-    gg_style(
-        df_class %>%
-        ggplot(aes(x = time_years, y = T_sum)) +
-        facet_wrap(~ pass, nrow = 2) +
-        geom_smooth(stat = "summary", fun.data = quantiles,
-                    aes(group = pass, color = pass, fill = pass)) +
-        geom_point(data = df_exp, aes(x = year, y = cd4_cells_per_mm3)) +
-        guides(color = "none", fill = "none")
-    )
-
-    ggsave(sprintf("../results/hiv-calipro-quantiles-iter-%d.pdf", iter),
-           width = width, height = height)
-
-    ## Plot the parameter rug plots.
+    ## Old parameter ranges.
     df_lhs <-
         as_tibble(lhs, rownames = "param_set") %>%
         mutate(param_set = as.integer(param_set)) %>%
         inner_join(df_class %>% distinct(param_set, replicate, pass),
                    by = "param_set") %>%
         pivot_longer(s:N, names_to = "param", values_to = "value")
-
-    df_lhs %>%
-        mutate(param = str_replace(param, "_(.*)", "[\\1]")) %>%
-        ggplot(aes(x = value, color = pass)) +
-        facet_wrap(~ param, nrow = 2, scales = "free",
-                   labeller = label_parsed) +
-        geom_density() +
-        geom_rug(sides = "b") +
-        guides(color = FALSE) +
-        theme(axis.text.y = element_blank(),
-              axis.ticks.y = element_blank())
-
-    ggsave(sprintf("../results/hiv-calipro-param-iter-%d.pdf", iter),
-           width = width, height = height)
-
-    ## Old ranges.
     ranges_prev <-
         df_lhs %>%
         select(param, value) %>%
@@ -295,7 +189,7 @@ for (iter in 1:n_iter) {
                     values_fn = list) %>%
         reframe(across(everything(), ~ range(.x[[1]])))
 
-    ## Calculate new parameter ranges.
+    ## Calculate the new parameter ranges using ADS.
     ranges_new <-
         df_lhs %>%
         nest(.by = param) %>%
@@ -303,31 +197,9 @@ for (iter in 1:n_iter) {
                     values_from = data) %>%
         reframe(across(everything(), ~ ads(.x[[1]])))
 
-    ## Print ranges before and after.
-    print(bind_rows(before = ranges_prev, after = ranges_new, .id = "range"))
-
-    ## Overlay purple ranges before and after on the density plots.
-    df_lhs %>%
-        mutate(param = str_replace(param, "_(.*)", "[\\1]")) %>%
-        ggplot(aes(x = value, color = pass)) +
-        facet_wrap(~ param, nrow = 2, scales = "free",
-                   labeller = label_parsed) +
-        geom_density() +
-        geom_rug(sides = "b") +
-        geom_vline(data =
-                       ranges_new %>%
-                       pivot_longer(everything(),
-                                    names_to = "param",
-                                    values_to = "value") %>%
-                       mutate(param = str_replace(param, "_(.*)", "[\\1]")),
-                   color = "purple",
-                   aes(xintercept = value)) +
-        guides(color = FALSE) +
-        theme(axis.text.y = element_blank(),
-              axis.ticks.y = element_blank())
-
-    ggsave(sprintf("../results/hiv-calipro-param-ads-iter-%d.pdf", iter),
-           width = width, height = height)
+    ## Tabulate parameter ranges before and after ADS adjutment.
+    ranges_both <-
+        bind_rows(before = ranges_prev, after = ranges_new, .id = "range")
 
     ## TODO: Fit priors to new parameter ranges.
 }
