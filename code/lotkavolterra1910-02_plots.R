@@ -193,4 +193,6 @@ ggparam <-
                                             expression(alpha))))
 ggsave("../results/lv-param.pdf", plot = ggparam, width = 7, height = 2.5)
 
-plot_grid(ggtraj, ggparam, align = "v", labels = "AUTO")
+plot_grid(ggtraj, ggparam,
+          ncol = 1, labels = c("(A)", "(B)"), label_fontface = "plain")
+ggsave("../results/lv-both.pdf", width = 7, height = 6.5)
