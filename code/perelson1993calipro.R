@@ -12,7 +12,7 @@ library(deSolve)
 library(lhs)
 library(plyr) # round_any
 library(tidyverse)
-theme_set(theme_bw())
+library(broom) # tidy.optim
 library(abind)
 
 initial_values <- c( # Table 1, page 88.
@@ -67,6 +67,87 @@ df_boundaries <-
     tibble(year = 0:10,
            lower = cd4[1],
            upper = cd4[2])
+
+## Use the default values in Table 1 as the medians, and to help fit the distributions
+## add quantiles as 50% and 150% of the median.
+df_prior_ranges <- tibble::tribble(
+    ~param, ~x, ~distr,
+    "s", c(5, 10, 15), "gamma",
+    "r", c(0.02, 0.03, 0.04), "gamma",
+    "mu_T", c(0.01, 0.02, 0.03), "gamma",
+    "mu_b", c(0.12, 0.24, 0.36), "gamma",
+    "mu_V", c(1.2, 2.4, 3.6), "gamma",
+    "k_1", c(1.2e-5, 2.4e-5, 3.6e-5), "gamma",
+    "k_2", c(2e-3, 3e-3, 4e-3), "gamma",
+    "N", c(536, 878, 1340), "nbinom",
+    ) %>%
+    mutate(q = list(c(0.25, .5, 0.75)), .before = x)##  %>%
+    ## unnest(cols = c(q, x))
+
+## Objective function to minimize to fit the distributions, that returns the
+## distance between the original and estimated values.
+fit_error <- function(distr, params, q, x) {
+    with(as.list(params, q, x), {
+        x_est <-
+            switch(distr,
+                   gamma = qgamma(q, shape = shape, scale = scale),
+                   nbinom = qnbinom(q, mu = mu, size = size))
+        mat <- matrix(c(x, x_est), nrow = length(x))
+        c(dist(t(mat)))
+    })
+}
+df_prior_fit <-
+    df_prior_ranges %>%
+    group_by(param) %>%
+    mutate(rescale = any(log10(unlist(x)) < -2) & distr == "gamma",
+           par_init = case_when(distr == "gamma" ~ list(c(shape = 0.1, scale = 1)),
+                                distr == "nbinom" ~ list(c(mu = 1000, size = 10))),
+           ## Trying to fit a gamma distribution to values close to zero will
+           ## fail, so increase the values and then divide the gamma scale
+           ## parameter later.
+           rescale_multiplier = ifelse(rescale,
+                                       10^floor(-log10(mean(unlist(x)))),
+                                       1)) %>%
+    group_by(param, rescale_multiplier) %>%
+    reframe(tidy(optim(par = unlist(par_init),
+                       fn = function(...) fit_error(distr, ...),
+                       q = unlist(q),
+                       x = unlist(x) * rescale_multiplier,
+                       ## All the parameters of the gamma and
+                       ## negative-binomial distributions must be
+                       ## greater than zero.
+                       lower = setNames(rep(0 + .Machine$double.eps,
+                                            length(unlist(par_init))),
+                                        names(unlist(par_init))),
+                       method = "L-BFGS-B"))) %>%
+    mutate(value = case_when(parameter == "scale" &
+                             rescale_multiplier != 1 ~
+                                 value / rescale_multiplier,
+                             .default = value))
+## Validate the fitted distributions using both distance between the values and
+## quantiles.
+df_prior_validate <-
+    df_prior_fit %>%
+    pivot_wider(names_from = parameter, values_from = value)
+args_list <-
+    df_prior_validate %>%
+    select(-param, -rescale_multiplier) %>%
+    as.matrix() %>%
+    apply(1, list) %>%
+    lapply(unlist, recursive = FALSE) %>%
+    lapply(na.omit) %>%
+    ## We don't need to know which values were dropped.
+    lapply(`attr<-`, "na.action", NULL)
+df_prior_validate %>%
+    select(param) %>%
+    inner_join(df_prior_ranges) %>%
+    group_by(param) %>%
+    mutate(q_est = list(do.call(str_c("p", distr),
+                                c(args_list[[cur_group_id()]], q = x))),
+           x_est = list(do.call(str_c("q", distr),
+                                c(args_list[[cur_group_id()]], p = q)))) %>%
+    unnest(cols = c(x, x_est, q, q_est)) %>%
+    print(n = Inf)
 
 ## Calibration adjustment function: Alternative Density Subtraction (ADS).
 ##
