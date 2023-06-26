@@ -3,8 +3,9 @@
 ## doi: 10.1016/0025-5564(93)90043-a. PMID: 8096155.
 ##
 ## Note these notation changes compared to the paper:
-## Paper | Here | Meaning
+## Paper | Here | Meaning # nolint
 ## ------+------+--------
+## T     | T_ui | Uninfected CD4+ T cells.
 ## T*    | T_li | Latently infected CD4+ T cells.
 ## T**   | T_ai | Actively infected CD4+ T cells.
 
@@ -16,22 +17,20 @@ library(broom) # tidy.optim
 library(abind)
 
 initial_values <- c( # Table 1, page 88.
-    T = 1e3,  # mm^{-3}, Uninfected CD4+ cells.
+    T_ui = 1e3,  # mm^{-3}, Uninfected CD4+ cells.
     T_li = 0, # mm^{-3}, Latently infected CD4+ cells.
     T_ai = 0, # mm^{-3}, Actively infected CD4+ cells.
     V = 1e-3  # mm^{-3}, HIV cells.
 )
-VARIES <- 774
 parameters <- c( # Table 1, page 88.
     s = 10,   # day^{-1}mm^{-3}, Rate of supply of CD4+ cells from precursors.
     r = 0.03, # day^{-1}, Rate of growth for the CD4+ cells.
-    T_max = 1.5e3, # mm^{-3}, Maximum CD4+ cells.
     mu_T = 0.02,   # day^{-1}, Death rate of uninfected and latently CD4+ cells.
     mu_b = 0.24,   # day^{-1}, Death rate of actively infected CD4+ cells.
     mu_V = 2.4,    # day^{-1}, Death rate of free virus.
     k_1 = 2.4e-5,  # mm^{3}day^{-1}, Rate constant for CD4+ becoming infected.
     k_2 = 3e-3,    # day^{-1}, Rate latently to actively infected conversion.
-    N = VARIES     # Number of free virus produced by lysing a CD4+ cell.
+    N = 774        # Number of free virus produced by lysing a CD4+ cell.
 )
 times <- seq(0, 10, by = 0.01) * 365 # years converted to days.
 
@@ -40,14 +39,16 @@ hiv_s_const <- function(t, initial_values, parameters) {
     ## Conveniently access members by name by constructing an environment from
     ## the data using with() and as.list() as shown in the deSolve package
     ## vignette of the Lorenz equation.
-    with(as.list(c(initial_values, parameters)), {
+    with(as.list(c(initial_values, parameters)), { # nolint start
+        T_max <- 1.5e3 # mm^{-3}, Maximum CD4+ cells.
         ## Rates of change (equations 5a-5d, page 87).
-        dT.dt <- s - mu_T*T + r*T*(1 - (T + T_li + T_ai)/T_max) - k_1*V*T
-        dT_li.dt <- k_1*V*T - mu_T*T_li - k_2*T_li
+        dT_ui.dt <- (s - mu_T*T_ui + r*T_ui*(1 - (T_ui + T_li + T_ai)/T_max)
+            - k_1*V*T_ui)
+        dT_li.dt <- k_1*V*T_ui - mu_T*T_li - k_2*T_li
         dT_ai.dt <- k_2*T_li - mu_b*T_ai
-        dV.dt <- N*mu_b*T_ai - k_1*V*T - mu_V*V
+        dV.dt <- N*mu_b*T_ai - k_1*V*T_ui - mu_V*V # nolint end
         ## Return the rates of change.
-        list(c(dT.dt, dT_li.dt, dT_ai.dt, dV.dt))
+        list(c(dT_ui.dt, dT_li.dt, dT_ai.dt, dV.dt))
     })
 }
 
@@ -68,8 +69,8 @@ df_boundaries <-
            lower = cd4[1],
            upper = cd4[2])
 
-## Use the default values in Table 1 as the medians, and to help fit the distributions
-## add quantiles as 50% and 150% of the median.
+## Use the default values in Table 1 as the medians, and to help fit the
+## distributions add quantiles as 50% and 150% of the median.
 df_prior_ranges <- tibble::tribble(
     ~param, ~x, ~distr,
     "s", c(5, 10, 15), "gamma",
@@ -81,8 +82,7 @@ df_prior_ranges <- tibble::tribble(
     "k_2", c(2e-3, 3e-3, 4e-3), "gamma",
     "N", c(536, 878, 1340), "nbinom",
     ) %>%
-    mutate(q = list(c(0.25, .5, 0.75)), .before = x)##  %>%
-    ## unnest(cols = c(q, x))
+    mutate(q = list(c(0.25, .5, 0.75)), .before = x)
 
 ## Objective function to minimize to fit the distributions, that returns the
 ## distance between the original and estimated values.
@@ -90,8 +90,8 @@ fit_error <- function(distr, params, q, x) {
     with(as.list(params, q, x), {
         x_est <-
             switch(distr,
-                   gamma = qgamma(q, shape = shape, scale = scale),
-                   nbinom = qnbinom(q, mu = mu, size = size))
+                   gamma = qgamma(q, shape = shape, scale = scale), # nolint
+                   nbinom = qnbinom(q, prob = prob, size = size))   # nolint
         mat <- matrix(c(x, x_est), nrow = length(x))
         c(dist(t(mat)))
     })
@@ -100,8 +100,24 @@ df_prior_fit <-
     df_prior_ranges %>%
     group_by(param) %>%
     mutate(rescale = any(log10(unlist(x)) < -2) & distr == "gamma",
-           par_init = case_when(distr == "gamma" ~ list(c(shape = 0.1, scale = 1)),
-                                distr == "nbinom" ~ list(c(mu = 1000, size = 10))),
+           par_init = case_when(distr == "gamma" ~
+                                    list(c(shape = 0.1, scale = 1)),
+                                distr == "nbinom" ~
+                                    list(c(prob = 0.2, size = 15))),
+           ## All the parameters of the gamma and negative-binomial
+           ## distributions must be greater than zero.
+           lower = list(setNames(rep(0 + .Machine$double.eps,
+                                     length(unlist(par_init))),
+                                 names(unlist(par_init)))),
+           ## The probability parameter of the negative-binomial distribution
+           ## must be less than or equal to 1.
+           upper = list(setNames(rep(Inf,
+                                     length(unlist(par_init))),
+                                 names(unlist(par_init)))),
+           upper = ifelse("prob" %in% names(unlist(par_init)), {
+               upper[[1]]["prob"] <- 1
+               upper
+           }, upper),
            ## Trying to fit a gamma distribution to values close to zero will
            ## fail, so increase the values and then divide the gamma scale
            ## parameter later.
@@ -113,12 +129,8 @@ df_prior_fit <-
                        fn = function(...) fit_error(distr, ...),
                        q = unlist(q),
                        x = unlist(x) * rescale_multiplier,
-                       ## All the parameters of the gamma and
-                       ## negative-binomial distributions must be
-                       ## greater than zero.
-                       lower = setNames(rep(0 + .Machine$double.eps,
-                                            length(unlist(par_init))),
-                                        names(unlist(par_init))),
+                       lower = unlist(lower),
+                       upper = unlist(upper),
                        method = "L-BFGS-B"))) %>%
     mutate(value = case_when(parameter == "scale" &
                              rescale_multiplier != 1 ~
@@ -155,7 +167,7 @@ df_prior_validate %>%
 ## Utilizes Parameter Density Estimation to Explore Parameter Space and
 ## Calibrate Complex Biological Models. Cell Mol Bioeng. 2020 Sep
 ## 15;14(1):31-47. doi: 10.1007/s12195-020-00650-z
-ads <- function(df, n = 512) {
+ads <- function(df, n = 512) { # nolint start
     range <- df %>% pull(value) %>% range()
     ## Fixed value / no passing values.
     if (all(range == range[1]) ||
@@ -180,7 +192,7 @@ ads <- function(df, n = 512) {
     if (nrow(bins_ads) == 0)
         return(range) ## No better values.
     bins_ads %>% pull(x) %>% range()
-}
+} # nolint end
 
 ## Calibration loop.
 n_iter <- 1
@@ -202,25 +214,28 @@ for (iter in 1:n_iter) {
     lhs_cdf <- array(aperm(lhs_cdf, c(1, 3, 2)),
                      dim = c(n_replicates * n_samples_per_replicate,
                              length(parameters)),
-                     dimnames = list(NULL, names(parameters)))    
-    ## Final LHS samples applying .
+                     dimnames = list(NULL, names(parameters)))
+    ## Final LHS samples.
     lhs <- array(-1, dim = dim(lhs_cdf), dimnames = dimnames(lhs_cdf))
-    lhs[, "s"] <- qgamma(lhs_cdf[, "s"], shape = 1.985656, scale = 5.681687)
-    lhs[, "r"] <- qgamma(lhs_cdf[, "r"], shape = 4.530347876, scale = 0.006990707)
-    lhs[, "T_max"] <- qnbinom(lhs_cdf[, "T_max"], mu = 562, size = 14.0126)
-    lhs[, "mu_T"] <- qgamma(lhs_cdf[, "mu_T"], shape = 2.10552523, scale = 0.01068658)
-    lhs[, "mu_b"] <- qgamma(lhs_cdf[, "mu_b"], shape = 1.9856561, scale = 0.1363606)
-    lhs[, "mu_V"] <- qgamma(lhs_cdf[, "mu_V"], shape = 1.985657, scale = 1.363605)
-    lhs[, "k_1"] <- qgamma(lhs_cdf[, "k_1"], shape = 1.985657, scale = 1.363605e-5)
-    lhs[, "k_2"] <- qgamma(lhs_cdf[, "k_2"], shape = 1.594566171, scale = 0.002008847)
-    ## Fix the bifurcation parameter for now instead of varying it.
-    lhs[, "N"] <- 1400L
+    for (param_ in df_prior_fit %>% distinct(param) %>% pull()) {
+        call <-
+            with(df_prior_fit %>% filter(param == param_), {
+                distr <-
+                    df_prior_ranges %>%
+                    filter(param == param_) %>%
+                    pull(distr)
+                list(what = str_c("q", distr),
+                     args = c(list(p = lhs_cdf[, param_]),
+                              setNames(value, parameter)))
+            })
+        lhs[, param_] <- do.call(call[["what"]], call[["args"]])
+    }
 
     ## Run the simulations with the LHS parameter samples.
     out <- list()
     i <- 1
     system.time({
-        for (i in 1:nrow(lhs)) {
+        for (i in seq_len(nrow(lhs))) {
             out[[i]] <- ode(y = initial_values,
                             times = times,
                             func = hiv_s_const,
@@ -234,7 +249,7 @@ for (iter in 1:n_iter) {
         lapply(out, as.data.frame) %>%
         bind_rows(.id = "param_set") %>%
         as_tibble() %>%
-        mutate(T_sum = T + T_li + T_ai,
+        mutate(T_sum = T_ui + T_li + T_ai,
                time_years = time / 365,
                param_set = as.integer(param_set),
                replicate = ceiling(param_set / n_samples_per_replicate))
@@ -294,7 +309,8 @@ for (iter in 1:n_iter) {
     ranges_changed <-
         ranges_both %>%
         mutate(bound = rep(c("lower", "upper"), 2), .before = 2) %>%
-        pivot_longer(cols = ! c(range, bound), names_to = "param", values_to = "value") %>%
+        pivot_longer(cols = ! c(range, bound), names_to = "param",
+                     values_to = "value") %>%
         pivot_wider(id_cols = c("param", "bound"), names_from = "range") %>%
         mutate(changed = before != after)
 
