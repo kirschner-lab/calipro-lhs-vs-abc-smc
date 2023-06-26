@@ -9,6 +9,12 @@
 ## T*    | T_li | Latently infected CD4+ T cells.
 ## T**   | T_ai | Actively infected CD4+ T cells.
 
+dump_and_browse <- function() {
+    ## Save debugging info to file last.dump.rda
+    dump.frames(to.file = TRUE)
+    browser()
+}
+options(error = dump_and_browse)
 library(deSolve)
 library(lhs)
 library(plyr) # round_any
@@ -124,7 +130,7 @@ df_prior_fit <-
            rescale_multiplier = ifelse(rescale,
                                        10^floor(-log10(mean(unlist(x)))),
                                        1)) %>%
-    group_by(param, rescale_multiplier) %>%
+    group_by(param, distr, rescale_multiplier) %>%
     reframe(tidy(optim(par = unlist(par_init),
                        fn = function(...) fit_error(distr, ...),
                        q = unlist(q),
@@ -143,23 +149,23 @@ df_prior_validate <-
     pivot_wider(names_from = parameter, values_from = value)
 args_list <-
     df_prior_validate %>%
-    select(-param, -rescale_multiplier) %>%
+    select(-param, -distr, -rescale_multiplier) %>%
     as.matrix() %>%
     apply(1, list) %>%
     lapply(unlist, recursive = FALSE) %>%
     lapply(na.omit) %>%
     ## We don't need to know which values were dropped.
     lapply(`attr<-`, "na.action", NULL)
-df_prior_validate %>%
+df_prior_comparison <-
+    df_prior_validate %>%
     select(param) %>%
-    inner_join(df_prior_ranges) %>%
+    inner_join(df_prior_ranges, by = "param") %>%
     group_by(param) %>%
     mutate(q_est = list(do.call(str_c("p", distr),
                                 c(args_list[[cur_group_id()]], q = x))),
            x_est = list(do.call(str_c("q", distr),
                                 c(args_list[[cur_group_id()]], p = q)))) %>%
-    unnest(cols = c(x, x_est, q, q_est)) %>%
-    print(n = Inf)
+    unnest(cols = c(x, x_est, q, q_est))
 
 ## Calibration adjustment function: Alternative Density Subtraction (ADS).
 ##
@@ -195,7 +201,7 @@ ads <- function(df, n = 512) { # nolint start
 } # nolint end
 
 ## Calibration loop.
-n_iter <- 1
+n_iter <- 50
 set.seed(123)
 seeds <- sample(1:1000, size = n_iter)
 iter <- 1
@@ -260,15 +266,18 @@ for (iter in 1:n_iter) {
         group_by(param_set) %>%
         mutate(pass = all(T_sum >= cd4[1] & T_sum <= cd4[2]))
 
-    message(sprintf("Overall pass rate across all replicates: %.1f%%",
+    message(sprintf("%2d: Overall pass rate across all replicates: %.1f%%",
+                    iter,
                     df_class %>% pull(pass) %>% mean() * 100))
 
-    message("Pass rate per replicate:")
-    print(
-        df_class %>%
-        group_by(replicate) %>%
-        summarize(pass = mean(pass) * 100)
-    )
+    message(do.call(sprintf,
+                    c(fmt = str_c("    Pass rate per replicate:",
+                                  str_c(rep(" %.0f%%", n_replicates),
+                                        collapse = "")),
+                      as.list(df_class %>%
+                              group_by(replicate) %>%
+                              summarize(pass = mean(pass) * 100) %>%
+                              pull(pass)))))
 
     ## Old parameter ranges.
     df_lhs <-
@@ -285,13 +294,22 @@ for (iter in 1:n_iter) {
                              too_few = "align_start") %>%
         mutate(value_is_cdf = ! is.na(cdf)) %>%
         select(-cdf)
-    ranges_prev <-
+    ranges_prev_src <-
         df_lhs %>%
-        select(param, value) %>%
-        pivot_wider(names_from = param,
-                    values_from = value,
-                    values_fn = list) %>%
-        reframe(across(everything(), ~ range(.x[[1]])))
+        mutate(value_is_cdf = ifelse(value_is_cdf, "cdf", "before")) %>%
+        pivot_wider(id_cols = c(param_set, replicate, param),
+                    names_from = "value_is_cdf",
+                    values_from = "value") %>%
+        group_by(param) %>%
+        arrange(param, before) %>%
+        slice(c(1, n())) %>%
+        mutate(bound = c("lower", "upper"))
+    ranges_prev <-
+        ranges_prev_src %>%
+        select(param, before, bound) %>%
+        pivot_wider(id_cols = bound, names_from = param,
+                    values_from = before) %>%
+        select(-bound)
 
     ## Calculate the new parameter ranges using ADS.
     ranges_new <-
@@ -321,5 +339,72 @@ for (iter in 1:n_iter) {
         break
     }
 
-    ## TODO: Fit priors to new parameter ranges.
+    ## Subset to parameters with new ranges.
+    df_prior_ranges_new <-
+        ranges_changed %>%
+        arrange(param, bound) %>%
+        ## Add quantile from old ranges.
+        left_join(ranges_prev_src, by = c("param", "bound", "before")) %>%
+        ## Fit new ranges.
+        rename(x = after, q = cdf) %>%
+        group_by(param) %>%
+        ## Only re-fit ranges that have changed.
+        filter(any(changed)) %>%
+        select(-bound, -before, -changed, -param_set, -replicate) %>%
+        reframe(q = list(q), x = list(x)) %>%
+        left_join(df_prior_ranges %>% select(param, distr),
+                  by = "param")
+
+    ## Fit priors to new parameter ranges.
+    df_prior_fit_new <-
+        df_prior_ranges_new %>%
+        group_by(param) %>%
+        mutate(rescale = any(log10(unlist(x)) < -2) & distr == "gamma",
+               par_init = case_when(distr == "gamma" ~
+                                        list(c(shape = 0.1, scale = 1)),
+                                    distr == "nbinom" ~
+                                        list(c(prob = 0.2, size = 15))),
+               ## All the parameters of the gamma and negative-binomial
+               ## distributions must be greater than zero.
+               lower = list(setNames(rep(0 + .Machine$double.eps,
+                                         length(unlist(par_init))),
+                                     names(unlist(par_init)))),
+               ## The probability parameter of the negative-binomial
+               ## distribution must be less than or equal to 1.
+               upper = list(setNames(rep(Inf,
+                                         length(unlist(par_init))),
+                                     names(unlist(par_init)))),
+               upper = ifelse("prob" %in% names(unlist(par_init)), {
+                   upper[[1]]["prob"] <- 1
+                   upper
+               }, upper),
+               ## Trying to fit a gamma distribution to values close to zero
+               ## will fail, so increase the values and then divide the gamma
+               ## scale parameter later.
+               rescale_multiplier = ifelse(rescale,
+                                           10^floor(-log10(mean(unlist(x)))),
+                                           1)) %>%
+        group_by(param, distr, rescale_multiplier) %>%
+        reframe(tidy(optim(par = unlist(par_init),
+                           fn = function(...) fit_error(distr, ...),
+                           q = unlist(q),
+                           x = unlist(x) * rescale_multiplier,
+                           lower = unlist(lower),
+                           upper = unlist(upper),
+                           method = "L-BFGS-B"))) %>%
+        mutate(value = case_when(parameter == "scale" &
+                                 rescale_multiplier != 1 ~
+                                     value / rescale_multiplier,
+                                 .default = value))
+
+    ## Carry over any missing parameter ranges from the previous run.
+    df_prior_ranges_new <-
+        bind_rows(df_prior_ranges_new,
+                  anti_join(df_prior_ranges, df_prior_ranges_new, by = "param"))
+    df_prior_fit_new <-
+        bind_rows(df_prior_fit_new,
+                  anti_join(df_prior_fit, df_prior_fit_new, by = "param"))
+
+    df_prior_ranges <- df_prior_ranges_new
+    df_prior_fit <- df_prior_fit_new
 }
