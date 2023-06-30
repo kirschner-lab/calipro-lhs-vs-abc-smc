@@ -9,17 +9,12 @@
 ## T*    | T_li | Latently infected CD4+ T cells.
 ## T**   | T_ai | Actively infected CD4+ T cells.
 
-dump_and_browse <- function() {
-    ## Save debugging info to file last.dump.rda
-    dump.frames(to.file = TRUE)
-    browser()
-}
-options(error = dump_and_browse)
 library(deSolve)
 library(lhs)
 library(plyr) # round_any
 library(tidyverse)
 library(broom) # tidy.optim
+library(DBI)
 library(abind)
 
 initial_values <- c( # Table 1, page 88.
@@ -200,12 +195,60 @@ ads <- function(df, n = 512) { # nolint start
     bins_ads %>% pull(x) %>% range()
 } # nolint end
 
+## Initialize the database to store the calibration data.
+timestamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
+db_path <- str_c("../results/perelson1993calipro-",
+                 timestamp,
+                 ".sqlite")
+db <- dbConnect(RSQLite::SQLite(), db_path)
+header_with_iter <- function(df) {
+    df %>% mutate(iter = 0L, .before = 1) %>% slice()
+}
+headers <- list(
+    prior_ranges = header_with_iter(df_prior_ranges %>% unnest(c(q, x))),
+    prior_fit = header_with_iter(df_prior_fit),
+    lhs = tibble(iter = integer(),
+                 param_set = integer(),
+                 replicate = integer(),
+                 param = character(),
+                 value = numeric(),
+                 q = numeric(),
+                 pass = logical()),
+    sim = tibble(iter = integer(),
+                 param_set = integer(),
+                 replicate = integer(),
+                 time = numeric(),
+                 time_years = numeric(),
+                 T_ui = numeric(),
+                 T_li = numeric(),
+                 T_ai = numeric(),
+                 T_sum = numeric(),
+                 V = numeric(),
+                 pass = logical())
+)
+for (i in seq_along(headers)) {
+    dbWriteTable(db, names(headers)[i], headers[[i]])
+}
+
+## Insert records prefixed with iteration.
+db_write_iter <- function(table, df) {
+    dbWriteTable(db,
+                 name = table,
+                 value = df %>% mutate(iter = iter, .before = 1),
+                 append = TRUE)
+}
+
 ## Calibration loop.
 n_iter <- 50
 set.seed(123)
 seeds <- sample(1:1000, size = n_iter)
 iter <- 1
+
 for (iter in 1:n_iter) {
+    ## Store the priors into the database.
+    db_write_iter("prior_ranges", df_prior_ranges %>% unnest(c(q, x)))
+    db_write_iter("prior_fit", df_prior_fit)
+
     ## Generate LHS samples.
     ##
     ## First sample random uniform LHS values for each replicate.
@@ -294,6 +337,15 @@ for (iter in 1:n_iter) {
                              too_few = "align_start") %>%
         mutate(value_is_cdf = ! is.na(cdf)) %>%
         select(-cdf)
+
+    ## Store the samples and simulations into the database.
+    db_write_iter("lhs",
+                  df_lhs %>%
+                  mutate(value_is_cdf = ifelse(value_is_cdf, "q", "value")) %>%
+                  pivot_wider(names_from = value_is_cdf,
+                              values_from = value))
+    db_write_iter("sim", df_class)
+
     ranges_prev_src <-
         df_lhs %>%
         mutate(value_is_cdf = ifelse(value_is_cdf, "cdf", "before")) %>%
@@ -408,3 +460,6 @@ for (iter in 1:n_iter) {
     df_prior_ranges <- df_prior_ranges_new
     df_prior_fit <- df_prior_fit_new
 }
+
+## Close the database.
+dbDisconnect(db)
