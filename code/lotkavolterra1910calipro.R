@@ -2,7 +2,6 @@ library(RNetCDF)
 library(deSolve)
 library(lhs)
 library(extraDistr) # {d,p,q}hnorm
-library(plyr)       # round_any
 library(tidyverse)
 library(broom) # tidy.optim
 library(DBI)
@@ -66,7 +65,7 @@ df_boundaries_set <-
     group_by(var) %>%
     pivot_wider(names_from = type, values_from = count) %>%
     mutate(abs_diff = abs(obs - smooth)) %>%
-    mutate(err = 2 * ceiling(max(abs_diff))) %>%
+    mutate(err = 8 * ceiling(max(abs_diff))) %>%
     ## Count values cannot be negative.
     mutate(min = pmax(smooth - err, 0L),
            max = pmax(smooth + err, 0L))
@@ -74,7 +73,7 @@ df_boundaries_set <-
 df_boundaries_set %>%
     ggplot(aes(time, obs, fill = var, ymin = min, ymax = max,
                group = var)) +
-    geom_ribbon(alpha = 0.5) +
+    geom_ribbon(alpha = 0.2) +
     geom_point(aes(color = var))
 
 df_boundaries <-
@@ -182,7 +181,6 @@ headers <- list(
                  param_set = integer(),
                  replicate = integer(),
                  time = numeric(),
-                 time_years = numeric(),
                  x = numeric(),
                  y = numeric(),
                  pass = logical())
@@ -332,9 +330,15 @@ for (iter in 1:n_iter) {
                     values_from = before) %>%
         select(-bound)
 
-    ## Calculate the new parameter ranges using ADS.
+    ## Calculate the new parameter ranges using ADS using the best replicate.
     ranges_new <-
         df_lhs %>%
+        filter(replicate ==
+               df_lhs %>%
+               group_by(replicate) %>%
+               summarize(pass = mean(pass)) %>%
+               slice_max(pass, with_ties = FALSE) %>%
+               pull(replicate)) %>%
         nest(.by = param) %>%
         pivot_wider(names_from = param,
                     values_from = data) %>%
