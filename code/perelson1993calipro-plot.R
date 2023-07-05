@@ -34,14 +34,23 @@ set.seed(123) # For sample_n()
 )
 
 ## Pass percentage line plot.
+df_pass_gt_90 <-
+    df_sim %>%
+    group_by(iter, replicate) %>%
+    mutate(pass_rep = sum(pass, na.rm = TRUE) * 100 / length(pass),
+           pass_gt_90 = pass_rep > 90) %>%
+    group_by(iter) %>%
+    summarize(pass_gt_90 = any(pass_gt_90))
 (
     plot_sim_pass <-
         df_sim %>%
         group_by(iter) %>%
         summarize(pass = sum(pass, na.rm = TRUE) * 100 / length(pass)) %>%
+        inner_join(df_pass_gt_90, by = "iter") %>%
         ggplot(aes(x = iter, y = pass)) +
         theme_bw() +
         geom_line() +
+        geom_point(aes(y = ifelse(pass_gt_90, pass, NA))) +
         labs(x = "CaliPro iteration",
              y = "Pass %") +
         scale_y_continuous(breaks = c(0, 50, 100))
@@ -130,13 +139,16 @@ args_list <-
         group_by(iter, param) %>%
         reframe(ymin = min(x), ymax = max(x)) %>%
         ungroup() %>%
-        ggplot(aes(x = iter, ymin = ymin, ymax = ymax)) +
+        inner_join(df_pass_gt_90, by = "iter") %>%
+        mutate(pass_gt_90 = ifelse(! pass_gt_90, NA, pass_gt_90)) %>%
+        ggplot(aes(x = iter, ymin = ymin, ymax = ymax, color = pass_gt_90)) +
         theme_bw() +
         facet_wrap(~ param, scales = "free_y",
                    labeller = labeller(param = label_parsed)) +
         geom_linerange() +
         labs(x = "CaliPro iteration",
-             y = "Parameter value")
+             y = "Parameter value") +
+        guides(color = "none")
 )
     
 df_lhs <- dbReadTable(db, "lhs") %>% as_tibble()
