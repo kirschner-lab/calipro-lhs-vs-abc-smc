@@ -4,6 +4,34 @@ library(DBI)
 library(Rtsne)
 library(cowplot)
 
+## Plot the original data and the calibration pass-fail criterion.
+df_exp <-
+    read_csv("../data/pantaleo1995-figure1.csv", col_types = "cdd")
+cd4 <-
+    df_exp %>%
+    pull(cd4_cells_per_mm3) %>%
+    range()
+accuracy <- 100
+cd4[1] <- plyr::round_any(cd4[1], accuracy = accuracy, f = floor)
+cd4[2] <- plyr::round_any(cd4[2], accuracy = accuracy, f = ceiling)
+plot.margin <- unit(c(30, 5.5, 5.5, 5.5), "points")
+(
+    plot_calipro <-
+        tibble(year = 0:10,
+               lower = cd4[1],
+               upper = cd4[2]) %>%
+        ggplot(aes(x = year)) +
+        theme_bw() +
+        theme(plot.margin = plot.margin) +
+        geom_ribbon(alpha = 0.2, aes(ymin = lower, ymax = upper)) +
+        geom_point(data = df_exp, aes(y = cd4_cells_per_mm3, color = group)) +
+        scale_x_continuous(breaks = 1:10) +
+        scale_y_continuous(breaks = c(0, 1000, 2000)) +
+        labs(x = "Year",
+             y = expression(atop(CD4^"+" ~ "T-cells", per ~ mm^3))) +
+        guides(color = "none")
+)
+
 ## Connect to the most recent database.
 db_path <- Sys.glob("../results/perelson1993calipro-*.sqlite") %>% tail(1)
 db <- dbConnect(RSQLite::SQLite(), db_path)
@@ -49,6 +77,7 @@ df_pass_gt_90 <-
         inner_join(df_pass_gt_90, by = "iter") %>%
         ggplot(aes(x = iter, y = pass)) +
         theme_bw() +
+        theme(plot.margin = plot.margin) +
         geom_line() +
         geom_point(aes(y = ifelse(pass_gt_90, pass, NA))) +
         labs(x = "CaliPro iteration",
@@ -56,14 +85,23 @@ df_pass_gt_90 <-
         scale_y_continuous(breaks = c(0, 50, 100))
 )
 
-plot_grid(plot_sim_pass,
+(
+    plot_top <-
+        plot_grid(plot_calipro,
+                  plot_sim_pass,
+                  nrow = 1,
+                  labels = c("(A)", "(B)"),
+                  label_x = c(0.05, -0.05),
+                  label_fontface = "plain")
+)
+
+plot_grid(plot_top,
           plot_sim,
           ncol = 1,
-          labels = c("(A)", "(B)"),
+          labels = c("", "(C)"),
           label_fontface = "plain",
           label_x = 0.03,
-          label_y = c(0.5, 1),
-          rel_heights = c(1, 8))
+          rel_heights = c(1, 4))
 
 ggsave("../results/hiv-calipro-traj.pdf", width = 7, height = 9.5)
 

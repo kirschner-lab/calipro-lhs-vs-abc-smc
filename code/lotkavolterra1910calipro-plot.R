@@ -1,10 +1,62 @@
 ## Plot results.
+library(RNetCDF)
 library(extraDistr)
 library(tidyverse)
 library(scales)
 library(DBI)
 library(Rtsne)
 library(cowplot)
+
+## Plot the original data and the calibration pass-fail criterion.
+##
+## Read in the raw experimental data.
+times <- seq(0, 15, length.out = 100) # Days.
+df_observed_new <- function(name, group) {
+    nc <- open.nc(name)
+    grp <- grp.inq.nc(nc, group)$self
+    mat <- var.get.nc(grp, "sim")
+    dimnames(mat) <- list(c("x", "y"), times)
+    t(mat) %>%
+        as_tibble(rownames = "time") %>%
+        mutate(time = as.numeric(time)) %>%
+        gather(key = var, value = count, x, y)
+}
+nc_observed <- "lotkavolterra1910-01_output-idata_lv.nc"
+df_observed <- df_observed_new(nc_observed, "observed_data")
+## Set the experimental data boundaries.
+##
+## Smooth the data to apply [ymin, ymax] tolerance bars to calibrate to.
+df_boundaries_set <-
+    df_observed %>%
+    group_by(var) %>%
+    reframe(smooth = ksmooth(time, count, kernel = "normal",
+                             x.points = time)) %>%
+    mutate(dim = names(smooth)) %>%
+    pivot_wider(names_from = dim, values_from = smooth) %>%
+    unnest(c(x, y)) %>%
+    dplyr::rename(time = x,
+                  count = y) %>%
+    bind_rows(smooth = ., obs = df_observed, .id = "type") %>%
+    group_by(var) %>%
+    pivot_wider(names_from = type, values_from = count) %>%
+    mutate(abs_diff = abs(obs - smooth)) %>%
+    mutate(err = 8 * ceiling(max(abs_diff))) %>%
+    ## Count values cannot be negative.
+    mutate(min = pmax(smooth - err, 0L),
+           max = pmax(smooth + err, 0L))
+plot.margin <- unit(c(30, 5.5, 5.5, 5.5), "points")
+(
+    plot_calipro <-
+        df_boundaries_set %>%
+        ggplot(aes(time, obs, fill = var, ymin = min, ymax = max,
+                   group = var)) +
+        theme_bw() +
+        theme(plot.margin = plot.margin) +
+        geom_ribbon(alpha = 0.2) +
+        geom_point(aes(color = var)) +
+        labs(x = "Population", y = "Time (years)") +
+        guides(color = "none", fill = "none")
+)
 
 ## Connect to the most recent database.
 db_path <- Sys.glob("../results/lotkavolterra1910calipro-*.sqlite") %>% tail(1)
@@ -46,20 +98,31 @@ set.seed(123) # For sample_n()
         summarize(pass = sum(pass, na.rm = TRUE) * 100 / length(pass)) %>%
         ggplot(aes(x = iter, y = pass)) +
         theme_bw() +
+        theme(plot.margin = plot.margin) +
         geom_line() +
         labs(x = "CaliPro iteration",
              y = "Pass %") +
         scale_y_continuous(breaks = c(0, 50))
 )
 
-plot_grid(plot_sim_pass,
+(
+    plot_top <-
+        plot_grid(plot_calipro,
+                  plot_sim_pass,
+                  nrow = 1,
+                  labels = c("(A)", "(B)"),
+                  label_x = c(0.01, -0.05),
+                  label_fontface = "plain")
+)
+
+plot_grid(plot_top,
           plot_sim,
           ncol = 1,
-          labels = c("(A)", "(B)"),
+          labels = c("", "(C)"),
           label_fontface = "plain",
           label_x = 0.01,
           label_y = c(0.5, 1),
-          rel_heights = c(1, 8))
+          rel_heights = c(1, 4))
 
 ggsave("../results/lv-calipro-traj.pdf", width = 7, height = 9.5)
 
