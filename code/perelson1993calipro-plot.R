@@ -5,8 +5,7 @@ library(Rtsne)
 library(cowplot)
 
 ## Plot the original data and the calibration pass-fail criterion.
-df_exp <-
-    read_csv("../data/pantaleo1995-figure1.csv", col_types = "cdd")
+df_exp <- read_csv("data/pantaleo1995-figure1.csv", col_types = "cdd")
 cd4 <-
     df_exp %>%
     pull(cd4_cells_per_mm3) %>%
@@ -33,7 +32,7 @@ plot.margin <- unit(c(30, 5.5, 5.5, 5.5), "points")
 )
 
 ## Connect to the most recent database.
-db_path <- Sys.glob("../results/perelson1993calipro-*.sqlite") %>% tail(1)
+db_path <- "results/perelson1993calipro.sqlite"
 db <- dbConnect(RSQLite::SQLite(), db_path)
 
 dbListTables(db)
@@ -55,7 +54,7 @@ set.seed(123) # For sample_n()
         facet_wrap(~iter) +
         geom_line(alpha = 0.2) +
         labs(x = "Time (years)",
-             y = bquote(sum(CD4^"+" ~ "T-cells") ~ (counts))) +
+             y = bquote(sum(CD4^"+" ~ "T-cells" ~ per ~ mm^3))) +
         guides(color = "none") +
         scale_x_continuous(breaks = c(0, 5, 10)) +
         scale_y_continuous(breaks = c(0, 1000, 2000), limits = c(0, 2400))
@@ -103,7 +102,7 @@ plot_grid(plot_top,
           label_x = 0.03,
           rel_heights = c(1, 4))
 
-ggsave("../results/hiv-calipro-traj.pdf", width = 7, height = 9.5)
+ggsave("results/fig-10-hiv-calipro-traj.pdf", width = 7, height = 9.5)
 
 ## NA values don't show up in pass-fail.
 df_sim %>%
@@ -144,10 +143,8 @@ df_sim %>%
     geom_line(alpha = 0.5) +
     ylim(x = c(0, 2400)) +
     labs(x = "Time (years)",
-         y = bquote(sum(CD4^"+" ~ "T-cells") ~ (counts))) +
+         y = bquote(sum(CD4^"+" ~ "T-cells" ~ per ~ mm^3))) +
     guides(color = "none")
-
-df_param <- dbReadTable(db, "param_fit") %>% as_tibble()
 
 df_prior_fit <-
     dbReadTable(db, "prior_fit") %>%
@@ -265,6 +262,6 @@ plot_grid(plot_param,
           label_fontface = "plain",
           rel_heights = c(3.5, 2))
 
-ggsave("../results/hiv-calipro-param.pdf", width = 7, height = 8)
+ggsave("results/fig-11-hiv-calipro-param.pdf", width = 7, height = 8)
 
 dbDisconnect(db)

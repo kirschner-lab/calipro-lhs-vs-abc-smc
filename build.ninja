@@ -1,0 +1,66 @@
+# Use ninja instead of make, because make doesn't have a clear way for handling
+# multiple output files.
+
+# Use the console pool to limit execution to a single task, because simulations
+# need to use all available CPUs and show important program output in the
+# console.
+rule python
+  command = python3 $in
+  pool = console
+
+# Use a separate $r_file input so that the NetCDF data input file can be
+# added to the $in dependencies of the Lotka-Volterra 1910 model.
+rule rscript
+  command = Rscript $r_file
+  pool = console
+
+build $
+  results/lotkavolterra1910abc-untrained.nc $
+  results/lotkavolterra1910abc.nc $
+  : $
+  python $
+  code/lotkavolterra1910abc.py
+
+# PyMC has trouble serializing the inference data with incomplete simulations
+# in any API supported output format (NetCDF, Pandas DataFrame, etc.) so fall
+# back to using Python's pickle format.
+build $
+  results/perelson1993abc.pkl $
+  : $
+  python $
+  code/perelson1993abc.py
+
+# NB: CaliPro uses the noisy observation dataset stored in
+# results/lotkavolterra1910abc.nc
+build $
+  results/lotkavolterra1910calipro.sqlite $
+  : $
+  rscript $
+  results/lotkavolterra1910abc.nc
+  r_file = code/lotkavolterra1910calipro.R
+
+build $
+  results/perelson1993calipro.sqlite $
+  : $
+  rscript
+  r_file = code/perelson1993calipro.R
+
+build $
+  results/fig-07-lv-calipro-traj.pdf $
+  results/fig-08-lv-calipro-param.pdf $
+  : $
+  rscript
+  r_file = code/lotkavolterra1910calipro-plot.R
+
+build $
+  results/fig-09-lv-abc.pdf $
+  : $
+  rscript
+  r_file = code/lotkavolterra1910abc-plot.R
+
+build $
+  results/fig-10-hiv-calipro-traj.pdf $
+  results/fig-11-hiv-calipro-param.pdf $
+  : $
+  rscript
+  r_file = code/perelson1993calipro-plot.R

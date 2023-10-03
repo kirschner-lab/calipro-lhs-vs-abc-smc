@@ -55,7 +55,7 @@ hiv_s_const <- function(t, initial_values, parameters) {
 
 ## Read in the raw experimental data.
 df_exp <-
-    read_csv("../data/pantaleo1995-figure1.csv", col_types = "cdd")
+    read_csv("data/pantaleo1995-figure1.csv", col_types = "cdd")
 
 ## Set the experimental data boundaries.
 cd4 <-
@@ -196,10 +196,10 @@ ads <- function(df, n = 512) { # nolint start
 } # nolint end
 
 ## Initialize the database to store the calibration data.
-timestamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-db_path <- str_c("../results/perelson1993calipro-",
-                 timestamp,
-                 ".sqlite")
+db_path <- "results/perelson1993calipro.sqlite"
+if (file.exists(db_path)) {
+    file.remove(db_path)
+}
 db <- dbConnect(RSQLite::SQLite(), db_path)
 header_with_iter <- function(df) {
     df %>% mutate(iter = 0L, .before = 1) %>% slice()

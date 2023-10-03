@@ -45,7 +45,7 @@ df_observed_new <- function(name, group) {
         mutate(time = as.numeric(time)) %>%
         gather(key = var, value = count, x, y)
 }
-nc_observed <- "lotkavolterra1910-01_output-idata_lv.nc"
+nc_observed <- "results/lotkavolterra1910abc.nc"
 df_observed <- df_observed_new(nc_observed, "observed_data")
 
 ## Set the experimental data boundaries.
@@ -159,10 +159,10 @@ ads <- function(df, n = 512) { # nolint start
 } # nolint end
 
 ## Initialize the database to store the calibration data.
-timestamp <- format(Sys.time(), "%Y%m%dT%H%M%S")
-db_path <- str_c("../results/lotkavolterra1910calipro-",
-                 timestamp,
-                 ".sqlite")
+db_path <- "results/lotkavolterra1910calipro.sqlite"
+if (file.exists(db_path)) {
+    file.remove(db_path)
+}
 db <- dbConnect(RSQLite::SQLite(), db_path)
 header_with_iter <- function(df) {
     df %>% mutate(iter = 0L, .before = 1) %>% slice()

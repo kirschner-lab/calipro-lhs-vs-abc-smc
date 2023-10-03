@@ -29,8 +29,8 @@ lv <- function(t, initial_values, parameters) {
     })
 }
 
-nc_prior <- "lotkavolterra1910-01_output-idata_untrained.nc"
-nc_posterior <- "lotkavolterra1910-01_output-idata_lv.nc"
+nc_prior <- "results/lotkavolterra1910abc-untrained.nc"
+nc_posterior <- "results/lotkavolterra1910abc.nc"
 
 df_prior_new <- function(name, group) {
     nc <- open.nc(name)
@@ -45,7 +45,8 @@ df_prior_new <- function(name, group) {
                           ~ ode(y = initial_values,
                                 times = times,
                                 func = lv,
-                                parms = replace(parameters, 1:2, c(.x, .y))) %>%
+                                parms = replace(parameters, 1:2,
+                                                c(.x, .y))) %>%
                               `class<-`("double") %>% as_tibble())) %>%
         unnest(out) %>%
         gather(key = var, value = count, x, y)
@@ -54,6 +55,8 @@ df_prior_new <- function(name, group) {
 }
 df_prior <- df_prior_new(nc_prior, "prior")
 
+colors <- setNames(rev(hue_pal(h = c(0, 360) + 15 + 90)(2)),
+                   c("Predator", "Prey"))
 df_prior %>%
     mutate(var = case_when(var == "x" ~ "Prey",
                            var == "y" ~ "Predator")) %>%
@@ -61,8 +64,9 @@ df_prior %>%
                color = var,
                group = interaction(var, draw))) +
     geom_line(alpha = 0.3) +
+    scale_color_manual(values = colors) +
     scale_y_log10() +
-    labs(x = "Time", y = "Population", color = "") +
+    labs(x = "Time (years)", y = "Population", color = "") +
     theme_bw() +
     theme(legend.position = "top")
 
@@ -101,7 +105,8 @@ df_data %>%
                group = var)) +
     geom_point() +
     scale_y_log10() +
-    labs(x = "Time", y = "Population", color = "") +
+    scale_color_manual(values = colors) +
+    labs(x = "Time (years)", y = "Population", color = "") +
     theme_bw() +
     theme(legend.position = "top")
 
@@ -117,7 +122,8 @@ df_posterior_new <- function(name, group) {
                           ~ ode(y = initial_values,
                                 times = times,
                                 func = lv,
-                                parms = replace(parameters, 1:2, c(.x, .y))) %>%
+                                parms = replace(parameters, 1:2,
+                                                c(.x, .y))) %>%
                               `class<-`("double") %>% as_tibble())) %>%
         unnest(out) %>%
         gather(key = var, value = count, x, y)
@@ -134,7 +140,8 @@ df_posterior %>%
                group = interaction(var, draw))) +
     geom_line(alpha = 0.3) +
     scale_y_log10() +
-    labs(x = "Time", y = "Population", color = "") +
+    scale_color_manual(values = colors) +
+    labs(x = "Time (years)", y = "Population", color = "") +
     theme_bw() +
     theme(legend.position = "top")
 
@@ -168,10 +175,10 @@ ggtraj <-
     facet_wrap(~ sample) +
     geom_line(alpha = 0.3) +
     scale_y_log10(labels = label_10exp) +
-    labs(x = "Time", y = "Population", color = "") +
+    scale_color_manual(values = colors) +
+    labs(x = "Time (years)", y = "Population", color = "") +
     theme_bw() +
     theme(legend.position = "top")
-ggsave("../results/lv-traj.pdf", plot = ggtraj, width = 7, height = 4)
 
 ggparam <-
     bind_rows("Uncalibrated" = df_prior,
@@ -185,14 +192,14 @@ ggparam <-
     facet_wrap(~ sample) +
     geom_boxplot(outlier.shape = NA) +
     geom_point(shape = 73, size = 5) +
+    scale_color_manual(values = colors) +
     theme_bw() +
     labs(x = "Value", y = "Parameter") +
     ## ## PDF export doesn't allow using UTF-8 characters for greek
     ## ## letters, so we have to use the native R rendering method.
     scale_y_discrete(label = parse(text = c(expression(beta),
                                             expression(alpha))))
-ggsave("../results/lv-param.pdf", plot = ggparam, width = 7, height = 2.5)
 
 plot_grid(ggtraj, ggparam,
           ncol = 1, labels = c("(A)", "(B)"), label_fontface = "plain")
-ggsave("../results/lv-both.pdf", width = 7, height = 6.5)
+ggsave("results/fig-09-lv-abc.pdf", width = 7, height = 6.5)

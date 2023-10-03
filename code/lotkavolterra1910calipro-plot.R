@@ -21,7 +21,7 @@ df_observed_new <- function(name, group) {
         mutate(time = as.numeric(time)) %>%
         gather(key = var, value = count, x, y)
 }
-nc_observed <- "lotkavolterra1910-01_output-idata_lv.nc"
+nc_observed <- "results/lotkavolterra1910abc.nc"
 df_observed <- df_observed_new(nc_observed, "observed_data")
 ## Set the experimental data boundaries.
 ##
@@ -45,6 +45,8 @@ df_boundaries_set <-
     mutate(min = pmax(smooth - err, 0L),
            max = pmax(smooth + err, 0L))
 plot.margin <- unit(c(30, 5.5, 5.5, 5.5), "points")
+colors <- setNames(hue_pal(h = c(0, 360) + 15 + 90)(2),
+                   c("x", "y"))
 (
     plot_calipro <-
         df_boundaries_set %>%
@@ -53,13 +55,15 @@ plot.margin <- unit(c(30, 5.5, 5.5, 5.5), "points")
         theme_bw() +
         theme(plot.margin = plot.margin) +
         geom_ribbon(alpha = 0.2) +
-        geom_point(aes(color = var)) +
-        labs(x = "Population", y = "Time (years)") +
+        geom_line(aes(color = var)) +
+        scale_color_manual(values = colors) +
+        scale_fill_manual(values = colors) +
+        labs(x = "Time (years)", y = "Population") +
         guides(color = "none", fill = "none")
 )
 
 ## Connect to the most recent database.
-db_path <- Sys.glob("../results/lotkavolterra1910calipro-*.sqlite") %>% tail(1)
+db_path <- "results/lotkavolterra1910calipro.sqlite"
 db <- dbConnect(RSQLite::SQLite(), db_path)
 
 dbListTables(db)
@@ -76,7 +80,7 @@ set.seed(123) # For sample_n()
         mutate(pass_percent = mean(pass)) %>%
         mutate(pass = as.logical(pass)) %>%
         group_by(iter, param_set) %>%
-        slice_sample(n = 25, weight_by = pass_percent) %>%
+        slice_sample(n = 25) %>%
         pivot_longer(cols = c(x, y), names_to = "var", values_to = "values") %>%
         ggplot(aes(time, values, color = pass,
                    group = interaction(iter, param_set, var))) +
@@ -84,7 +88,7 @@ set.seed(123) # For sample_n()
         facet_wrap(~iter) +
         geom_line(alpha = 0.1) +
         labs(x = "Time (years)",
-             y = "Counts") +
+             y = "Population") +
         guides(color = "none") +
         scale_y_log10(labels = label_10exp, limits = c(1, 50),
                       breaks = c(1, 10))
@@ -124,7 +128,7 @@ plot_grid(plot_top,
           label_y = c(0.5, 1),
           rel_heights = c(1, 4))
 
-ggsave("../results/lv-calipro-traj.pdf", width = 7, height = 9.5)
+ggsave("results/fig-07-lv-calipro-traj.pdf", width = 7, height = 9.5)
 
 df_prior_fit <-
     dbReadTable(db, "prior_fit") %>%
@@ -157,7 +161,8 @@ args_list <-
                                  args = c(args_list[[cur_group_id()]],
                                           p = list(c(.03, .97)))))) %>%
         unnest(cols = x) %>%
-        mutate(param = str_replace(param, "_(.+)$", "[\\1]")) %>%
+        mutate(param = case_when(param == "a" ~ "alpha",
+                                 param == "b" ~ "beta")) %>%
         group_by(iter, param) %>%
         reframe(ymin = min(x), ymax = max(x)) %>%
         ungroup() %>%
@@ -171,22 +176,29 @@ args_list <-
         geom_linerange() +
         labs(x = "CaliPro iteration",
              y = "Parameter value") +
-        guides(color = FALSE)
+        guides(color = "none")
 )
 
 (
     plot_sim_pass_max <-
         df_sim %>%
         inner_join(df_sim_pass_max, by = c("iter", "replicate")) %>%
-        pivot_longer(cols = c(x, y), names_to = "var", values_to = "values") %>%
-        mutate(pass = as.logical(pass)) %>%
+        ## Use unicode characters for greek letters:
+        ## https://stackoverflow.com/a/27741196
+        rename(Prey = x,
+               Predator = y) %>%
+        pivot_longer(cols = c(Prey, Predator),
+                     names_to = "var", values_to = "values") %>%
+        mutate(pass = as.logical(pass),
+               ## Arrange Prey before Predator.
+               var = factor(var, c("Prey", "Predator"))) %>%
         ggplot(aes(time, values, color = pass,
                    group = interaction(iter, param_set, var))) +
         theme_bw() +
         facet_wrap(~var) +
         geom_line(alpha = 0.2) +
         labs(x = "Time (years)",
-             y = "Counts") +
+             y = "Population") +
         guides(color = "none") +
         scale_y_log10(labels = label_10exp, limits = c(0.01, 50),
                       breaks = c(0.1, 1, 10))
@@ -268,6 +280,6 @@ plot_grid(plot_param,
           labels = c("(A)", "(B)", ""),
           label_fontface = "plain")
 
-ggsave("../results/lv-calipro-param.pdf", width = 7, height = 9)
+ggsave("results/fig-08-lv-calipro-param.pdf", width = 7, height = 9)
 
 dbDisconnect(db)

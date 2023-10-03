@@ -1,6 +1,3 @@
-import functools
-import itertools
-
 import numpy as np
 import pymc as pm
 from scipy.integrate import odeint
@@ -47,24 +44,19 @@ if __name__ == '__main__':
                            params=(a, b, c, d), epsilon=10)
         # Collect inference data.
         idata_untrained = pm.sample_prior_predictive(samples=75)
-    # draws = pm.draw([a, b, c, d], draws=75)
-    # idata_untrained = itertools.starmap(
-    #     functools.partial(simulate_lotka_volterra, None),
-    #     zip(*draws))
-    idata_untrained.to_netcdf("lotkavolterra1910-01_output-idata_untrained.nc")
+    idata_untrained.to_netcdf("results/lotkavolterra1910abc-untrained.nc")
 
-    # # Simulate from the model.
-    # with pm.Model() as model_lv:
-    #     a = pm.HalfNormal('a', 1.0)
-    #     b = pm.HalfNormal('b', 1.0)
-    #     c = pm.ConstantData('c', 1.5)
-    #     d = pm.ConstantData('d', 0.75)
-    #     # Instead of specifying a likelihood function, simulate from the
-    #     # model.
-    #     sim = pm.Simulator('sim', simulate_lotka_volterra,
-    #                        params=(a, b, c, d), epsilon=10,
-    #                        observed=observed)
-    #     # Collect inference data.
-    #     idata_lv = pm.sample_smc()
-
-    # idata_lv.to_netcdf("lotkavolterra1910-01_output-idata_lv.nc")
+    # Simulate from the model.
+    with pm.Model() as model_lv:
+        a = pm.HalfNormal('a', 1.0)
+        b = pm.HalfNormal('b', 1.0)
+        c = pm.ConstantData('c', 1.5)
+        d = pm.ConstantData('d', 0.75)
+        # Instead of specifying a likelihood function, simulate from the
+        # model.
+        sim = pm.Simulator('sim', simulate_lotka_volterra,
+                           params=(a, b, c, d), epsilon=10,
+                           observed=observed)
+        # Collect inference data.
+        idata_lv = pm.sample_smc()
+    idata_lv.to_netcdf("results/lotkavolterra1910abc.nc")

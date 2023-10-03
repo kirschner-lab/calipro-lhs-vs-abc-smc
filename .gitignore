@@ -1,0 +1,4 @@
+# Ignore output of `M-x markdown-live-preview-mode`
+README.html
+# Ignore exploratory R plots
+Rplots.pdf

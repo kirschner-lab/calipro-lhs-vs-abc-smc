@@ -1,4 +1,0 @@
-pandas
-pyabc
-pyarrow
-scikits.odes
